@@ -221,96 +221,28 @@ Interaction diagram showing how Service Candidates collaborate to fulfill the bu
 ```mermaid
 sequenceDiagram
     participant Client
-    participant APIGateway
-    participant AuthService
-    participant PatientService
-    participant StaffService
-    participant AppointmentService
-    participant MedicationService
-    participant KafkaBroker
+    participant OrderProcessingTaskService
+    participant OrderService
+    participant PaymentService
+    participant InventoryService
     participant NotificationService
 
-    %% Authentication
-    Client->>APIGateway: Login (POST /auth/login)
-    APIGateway->>AuthService: POST /auth/login (username, password)
-    AuthService-->>APIGateway: JWT token
-    APIGateway-->>Client: JWT token
+    Client->>OrderProcessingTaskService: Submit Order
 
-    %% View patient info
-    Client->>APIGateway: Get patient info (GET /patients/{id}) + JWT
-    APIGateway->>AuthService: rpc VerifyToken(JWT)
-    AuthService-->>APIGateway: userId, role
-    APIGateway->>PatientService: rpc GetPatient(patientId)
-    PatientService-->>APIGateway: Patient
-    APIGateway-->>Client: Patient info
+    OrderProcessingTaskService->>OrderService: Create Order Record
+    OrderService-->>OrderProcessingTaskService: Order Created
 
-    %% Create appointment
-    Client->>APIGateway: Create appointment (POST /appointments) + JWT
-    APIGateway->>AuthService: rpc VerifyToken(JWT)
-    AuthService-->>APIGateway: userId, role
-    APIGateway->>AppointmentService: POST /appointments
-    AppointmentService->>PatientService: rpc GetPatient(patientId)
-    PatientService-->>AppointmentService: Patient
-    AppointmentService->>StaffService: rpc GetStaff(staffId)
-    StaffService-->>AppointmentService: MedicalStaff
-    AppointmentService-->>APIGateway: Appointment created
-    APIGateway-->>Client: Appointment created
+    OrderProcessingTaskService->>PaymentService: Process Payment Transaction
+    PaymentService-->>OrderProcessingTaskService: Payment Confirmed
 
-    %% Create appointment report → triggers medication flow
-    Client->>APIGateway: Create appointment report (POST /appointments/{id}/report) + JWT
-    APIGateway->>AuthService: rpc VerifyToken(JWT)
-    AuthService-->>APIGateway: userId, role
-    APIGateway->>AppointmentService: POST /appointments/{id}/report
-    AppointmentService-->>APIGateway: AppointmentReport
-    APIGateway-->>Client: Report created
-    AppointmentService->>KafkaBroker: Publish appointment_report.created (appointmentReportId, patientId)
+    OrderProcessingTaskService->>InventoryService: Update Inventory Stock
+    InventoryService-->>OrderProcessingTaskService: Inventory Updated
 
-    %% Doctor creates prescription after consuming event
-    KafkaBroker->>MedicationService: Consume appointment_report.created
-    Client->>APIGateway: Create prescription (POST /prescriptions) + JWT
-    APIGateway->>AuthService: rpc VerifyToken(JWT)
-    AuthService-->>APIGateway: userId, role
-    APIGateway->>MedicationService: POST /prescriptions
-    MedicationService->>AppointmentService: rpc GetAppointment(appointmentId)
-    AppointmentService-->>MedicationService: Appointment
-    MedicationService-->>APIGateway: Prescription created
-    APIGateway-->>Client: Prescription created
+    OrderProcessingTaskService->>NotificationService: Send Order Confirmation Notification
+    NotificationService-->>OrderProcessingTaskService: Notification Sent
 
-    %% Add prescription items → schedules auto-generated
-    Client->>APIGateway: Add prescription item (POST /prescriptions/{id}/items) + JWT
-    APIGateway->>AuthService: rpc VerifyToken(JWT)
-    AuthService-->>APIGateway: userId, role
-    APIGateway->>MedicationService: POST /prescriptions/{id}/items
-    MedicationService-->>APIGateway: PrescriptionItem + MedicationSchedule[]
-    APIGateway-->>Client: Schedules created
-
-    %% Scheduler triggers reminder at scheduled time
-    MedicationService->>KafkaBroker: Publish medication_schedule.due (scheduleId, patientId, scheduledTime)
-    KafkaBroker->>NotificationService: Consume medication_schedule.due
-    NotificationService->>MedicationService: rpc GetMedicationSchedule(scheduleId)
-    MedicationService-->>NotificationService: MedicationSchedule
-    NotificationService->>PatientService: rpc GetPatient(patientId)
-    PatientService-->>NotificationService: Patient
-    NotificationService-->>Client: Send medication reminder to patient
-
-    %% Patient confirms medication taken
-    Client->>APIGateway: Confirm medication taken (PUT /schedules/{id}/confirm) + JWT
-    APIGateway->>AuthService: rpc VerifyToken(JWT)
-    AuthService-->>APIGateway: userId, role
-    APIGateway->>MedicationService: PUT /schedules/{id}/confirm
-    MedicationService-->>APIGateway: Schedule status → CONFIRMED
-    APIGateway-->>Client: Confirmation success
-
-    %% If patient misses medication (timeout)
-    MedicationService->>KafkaBroker: Publish medication_schedule.missed (scheduleId, patientId, doctorId)
-    KafkaBroker->>NotificationService: Consume medication_schedule.missed
-    NotificationService->>PatientService: rpc GetPatient(patientId)
-    PatientService-->>NotificationService: Patient
-    NotificationService->>StaffService: rpc GetStaff(doctorId)
-    StaffService-->>NotificationService: MedicalStaff (Doctor)
-    NotificationService-->>Client: Notify doctor and hospital staff of missed medication
+    OrderProcessingTaskService-->>Client: Return Order Confirmation
 ```
-
 
 ## Part 3 — Service-Oriented Design
 
