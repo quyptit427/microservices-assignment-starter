@@ -207,129 +207,64 @@ sequenceDiagram
 
 ## Part 3 — Service-Oriented Design
 
-### 3.1 Uniform Contract Design
+## 3.1 Uniform Contract Design
 
 Service Contract specification for each service. Full OpenAPI specs:
-- [`docs/api-specs/service-a.yaml`](api-specs/service-a.yaml)
-- [`docs/api-specs/service-b.yaml`](api-specs/service-b.yaml)
 
-**API Gateway:**
-
-| Endpoint | Method | Media Type | Response Codes |
-|----------|--------|------------|----------------|
-| `/auth/register` | POST | application/json | 201, 400, 409 |
-| `/auth/login` | POST | application/json | 200, 400, 401 |
-| `/auth/logout` | POST | application/json | 200, 401 |
-| `/patients` | GET | application/json | 200, 401, 403 |
-| `/patients/{id}` | GET | application/json | 200, 401, 403, 404 |
-| `/patients` | POST | application/json | 201, 400, 401, 403 |
-| `/patients/{id}` | PUT | application/json | 200, 400, 401, 403, 404 |
-| `/staff` | GET | application/json | 200, 401, 403 |
-| `/staff/{id}` | GET | application/json | 200, 401, 403, 404 |
-| `/staff/doctors` | POST | application/json | 201, 400, 401, 403 |
-| `/staff/hospital-staff` | POST | application/json | 201, 400, 401, 403 |
-| `/appointments` | GET | application/json | 200, 401, 403 |
-| `/appointments/{id}` | GET | application/json | 200, 401, 403, 404 |
-| `/appointments` | POST | application/json | 201, 400, 401, 403 |
-| `/appointments/{id}` | PUT | application/json | 200, 400, 401, 403, 404 |
-| `/appointments/{id}/report` | POST | application/json | 201, 400, 401, 403 |
-| `/appointments/{id}/report` | GET | application/json | 200, 401, 403, 404 |
-| `/medications` | GET | application/json | 200, 401, 403 |
-| `/medications/{id}` | GET | application/json | 200, 401, 403, 404 |
-| `/medications` | POST | application/json | 201, 400, 401, 403 |
-| `/prescriptions` | POST | application/json | 201, 400, 401, 403 |
-| `/prescriptions/{id}` | GET | application/json | 200, 401, 403, 404 |
-| `/prescriptions/{id}/items` | POST | application/json | 201, 400, 401, 403 |
-| `/prescriptions/{id}/items` | GET | application/json | 200, 401, 403, 404 |
-| `/schedules` | GET | application/json | 200, 401, 403 |
-| `/schedules/{id}/confirm` | PUT | application/json | 200, 401, 403, 404 |
-| `/notifications/{recipientId}` | GET | application/json | 200, 401, 403 |
-| `/notifications/{id}/read` | PUT | application/json | 200, 401, 403, 404 |
+docs/api-specs/order-service.yaml  
+docs/api-specs/payment-service.yaml  
+docs/api-specs/inventory-service.yaml  
+docs/api-specs/notification-service.yaml  
+docs/api-specs/order-processing-task-service.yaml  
 
 ---
 
-**Auth Service:**
+### Order Service
 
 | Endpoint | Method | Media Type | Response Codes |
-|----------|--------|------------|----------------|
-| `/auth/register` | POST | `application/json` | 201, 400, 409 |
-| `/auth/login` | POST | `application/json` | 200, 400, 401 |
-| `/auth/logout` | POST | `application/json` | 200, 401 |
-| `rpc VerifyToken(VerifyTokenRequest)` | gRPC | `application/grpc+proto` | OK, UNAUTHENTICATED |
+|---------|--------|------------|---------------|
+| /orders/validate | POST | application/json | 200, 400 |
+| /orders | POST | application/json | 201, 400 |
+| /orders/{id} | GET | application/json | 200, 404 |
+| /orders/{id}/status | PUT | application/json | 200, 400, 404 |
 
 ---
 
-**Patient Service:**
+### Payment Service
 
 | Endpoint | Method | Media Type | Response Codes |
-|----------|--------|------------|----------------|
-| `/patients` | GET | `application/json` | 200, 401, 403 |
-| `/patients/{id}` | GET | `application/json` | 200, 401, 404 |
-| `/patients` | POST | `application/json` | 201, 400, 401 |
-| `/patients/{id}` | PUT | `application/json` | 200, 400, 401, 404 |
-| `rpc GetPatient(GetPatientRequest)` | gRPC | `application/grpc+proto` | OK, NOT_FOUND |
+|---------|--------|------------|---------------|
+| /payments | POST | application/json | 200, 400, 402 |
+| /payments/{id} | GET | application/json | 200, 404 |
+| /payments/{id}/confirm | GET | application/json | 200, 404 |
 
 ---
 
-**Staff Service:**
+### Inventory Service
 
 | Endpoint | Method | Media Type | Response Codes |
-|----------|--------|------------|----------------|
-| `/staff` | GET | `application/json` | 200, 401, 403 |
-| `/staff/{id}` | GET | `application/json` | 200, 401, 404 |
-| `/staff/doctors` | POST | `application/json` | 201, 400, 401 |
-| `/staff/hospital-staff` | POST | `application/json` | 201, 400, 401 |
-| `rpc GetStaff(GetStaffRequest)` | gRPC | `application/grpc+proto` | OK, NOT_FOUND |
+|---------|--------|------------|---------------|
+| /inventory/check | GET | application/json | 200, 404 |
+| /inventory/{id} | GET | application/json | 200, 404 |
+| /inventory/{id} | PUT | application/json | 200, 400, 404 |
 
 ---
 
-**Appointment Service:**
+### Notification Service
 
 | Endpoint | Method | Media Type | Response Codes |
-|----------|--------|------------|----------------|
-| `/appointments` | GET | `application/json` | 200, 401, 403 |
-| `/appointments/{id}` | GET | `application/json` | 200, 401, 404 |
-| `/appointments` | POST | `application/json` | 201, 400, 401 |
-| `/appointments/{id}` | PUT | `application/json` | 200, 400, 401, 404 |
-| `/appointments/{id}/report` | POST | `application/json` | 201, 400, 401, 404 |
-| `/appointments/{id}/report` | GET | `application/json` | 200, 401, 404 |
-| `rpc GetAppointment(GetAppointmentRequest)` | gRPC | `application/grpc+proto` | OK, NOT_FOUND |
-| `appointment_report.created` (publish) | Kafka | `application/json` | — |
+|---------|--------|------------|---------------|
+| /notifications/order-confirmation | POST | application/json | 200, 400 |
+| /notifications/payment | POST | application/json | 200, 400 |
 
 ---
 
-**Medication Service:**
+### Order Processing Task Service
 
 | Endpoint | Method | Media Type | Response Codes |
-|----------|--------|------------|----------------|
-| `/medications` | GET | `application/json` | 200, 401 |
-| `/medications/{id}` | GET | `application/json` | 200, 401, 404 |
-| `/medications` | POST | `application/json` | 201, 400, 401 |
-| `/prescriptions` | POST | `application/json` | 201, 400, 401 |
-| `/prescriptions/{id}` | GET | `application/json` | 200, 401, 404 |
-| `/prescriptions/{id}/items` | POST | `application/json` | 201, 400, 401, 404 |
-| `/prescriptions/{id}/items` | GET | `application/json` | 200, 401, 404 |
-| `/schedules` | GET | `application/json` | 200, 401 |
-| `/schedules/{id}/confirm` | PUT | `application/json` | 200, 400, 401, 404 |
-| `rpc GetMedicationSchedule(GetScheduleRequest)` | gRPC | `application/grpc+proto` | OK, NOT_FOUND |
-| `appointment_report.created` (consume) | Kafka | `application/json` | — |
-| `medication_schedule.due` (publish) | Kafka | `application/json` | — |
-| `medication_schedule.missed` (publish) | Kafka | `application/json` | — |
-
----
-
-**Notification Service:**
-
-| Endpoint | Method | Media Type | Response Codes |
-|----------|--------|------------|----------------|
-| `/notifications/{recipientId}` | GET | `application/json` | 200, 401, 404 |
-| `/notifications/{id}/read` | PUT | `application/json` | 200, 401, 404 |
-| `rpc SendReminder(SendReminderRequest)` | gRPC | `application/grpc+proto` | OK, NOT_FOUND |
-| `medication_schedule.due` (consume) | Kafka | `application/json` | — |
-| `medication_schedule.missed` (consume) | Kafka | `application/json` | — |
-
----
-
+|---------|--------|------------|---------------|
+| /order-processing | POST | application/json | 201, 400, 402, 409 |
+| /order-processing/{id} | GET | application/json | 200, 404 |
 
 ### 3.2 Service Logic Design
 
