@@ -80,21 +80,28 @@ Non-functional requirements serve as input for identifying Utility Service and M
 
 ## Part 2 — REST/Microservices Modeling
 
+# Part 2 — REST/Microservices Modeling
+
+---
+
 ### 2.1 Decompose Business Process & 2.2 Filter Unsuitable Actions
 
 Decompose the process from 1.1 into granular actions. Mark actions unsuitable for service encapsulation.
 
 | # | Action | Actor | Description | Suitable? |
 |---|--------|-------|-------------|-----------|
-| 1 | Submit order | Customer | Customer submits a purchase order with selected products and quantities | ✅ |
-| 2 | Validate order | System | Validate order details, customer information, and product availability | ✅ |
-| 3 | Calculate total price | System | Calculate total payable amount for the order including all applicable charges | ✅ |
-| 4 | Process payment | System / Payment Gateway | Submit payment transaction to payment gateway for authorization and processing | ✅ |
-| 5 | Confirm payment | Payment Gateway | Return payment confirmation and transaction result to the system | ✅ |
-| 6 | Update inventory | System | Deduct purchased product quantities from inventory stock | ✅ |
-| 7 | Save order record | System | Persist finalized order details into order database | ✅ |
-| 8 | Send confirmation notification | Notification Service | Send order confirmation notification to customer | ✅ |
-| 9 | Ship order | Warehouse Staff | Physically package and deliver order to customer | ❌ |
+| 1 | Submit Order | Customer | Customer submits a purchase order with selected products and quantities | ✅ |
+| 2 | Validate Order | System | Validate order details and verify submitted information | ✅ |
+| 3 | Create Order Record | System | Persist initial order information into the order system | ✅ |
+| 4 | Process Payment | Payment Gateway | Process payment transaction for the submitted order | ✅ |
+| 5 | Confirm Payment | Payment Gateway | Return payment result and confirmation status | ✅ |
+| 6 | Check Inventory | System | Verify product stock availability before fulfillment | ✅ |
+| 7 | Update Inventory | System | Deduct purchased quantities from inventory stock | ✅ |
+| 8 | Send Confirmation Notification | System | Notify customer that the order has been successfully processed | ✅ |
+| 9 | Ship Order | Warehouse Staff | Physically package and deliver the order | ❌ |
+
+Actions marked ❌ require manual physical execution and cannot be encapsulated as autonomous services.
+
 ---
 
 ### 2.3 Entity Service Candidates
@@ -103,22 +110,20 @@ Identify business entities and group reusable (agnostic) actions into Entity Ser
 
 | Entity | Service Candidate | Agnostic Actions |
 |--------|------------------|------------------|
-| Order | Order Service | Create Order Record, Retrieve Order Details, Update Order Status |
-| Payment | Payment Service | Process Payment Transaction, Confirm Payment Status, Retrieve Payment Details |
-| Inventory | Inventory Service | Check Product Availability, Update Inventory Stock, Retrieve Inventory Status |
-| Notification | Notification Service | Send Order Confirmation Notification, Send Payment Notification |
+| Order | Order Service | Validate Order, Create Order Record, Retrieve Order Details, Update Order Status |
+| Payment | Payment Service | Process Payment Transaction, Confirm Payment Status, Retrieve Payment Information |
+| Inventory | Inventory Service | Check Inventory Availability, Update Inventory Stock, Retrieve Inventory Status |
+| Notification | Notification Service | Send Confirmation Notification, Send Payment Notification |
 
 ---
 
 ### 2.4 Task Service Candidate
 
-Group process-specific (non-agnostic) actions into Task Service Candidates.
+Group process-specific (non-agnostic) actions into a Task Service Candidate.
 
 | Non-agnostic Action | Task Service Candidate |
-|---------------------|------------------------|
-| Generate medication reminder schedules from prescription items after appointment report is created | **MedicationScheduleTask Service** — triggered via Kafka: `appointment_report.created` |
-| Trigger medication reminder at exact scheduled time for a specific patient | **ReminderTrigger Task Service** — triggered via Kafka: `medication_schedule.due` |
-| Detect missed medication and alert doctor + hospital staff when patient does not confirm within time window | **MissedMedicationAlert Task Service** — triggered via Kafka: `medication_schedule.missed` |
+|--------------------|-----------------------|
+| Coordinate end-to-end order processing workflow | Order Processing Task Service |
 
 ---
 
@@ -127,77 +132,29 @@ Group process-specific (non-agnostic) actions into Task Service Candidates.
 Map entities/processes to REST URI Resources.
 
 | Entity / Process | Resource URI |
-|------------------|--------------|
-| User registration | `/auth/register` |
-| User login | `/auth/login` |
-| User logout | `/auth/logout` |
-| Patient list | `/patients` |
-| Patient profile | `/patients/{id}` |
-| Staff list | `/staff` |
-| Staff profile | `/staff/{id}` |
-| Doctor profile (create) | `/staff/doctors` |
-| Hospital staff profile (create) | `/staff/hospital-staff` |
-| Appointment list | `/appointments` |
-| Appointment detail | `/appointments/{id}` |
-| Appointment report | `/appointments/{id}/report` |
-| Medication list | `/medications` |
-| Medication detail | `/medications/{id}` |
-| Prescription list | `/prescriptions` |
-| Prescription detail | `/prescriptions/{id}` |
-| Prescription items | `/prescriptions/{id}/items` |
-| Medication schedule list | `/schedules` |
-| Medication schedule confirm | `/schedules/{id}/confirm` |
-| Notification list by recipient | `/notifications/{recipientId}` |
-| Notification read status | `/notifications/{id}/read` |
+|------------------|-------------|
+| Order | /orders |
+| Payment | /payments |
+| Inventory | /inventory |
+| Notification | /notifications |
+| Order Processing Workflow | /order-processing |
 
 ---
 
 ### 2.6 Associate Capabilities with Resources and Methods
 
-| Service Candidate | Capability | Resource / RPC / Topic | Protocol | HTTP Method |
-|-------------------|------------|------------------------|----------|-------------|
-| **API Gateway** | Route & forward all client requests | All `/` routes | REST (proxy) | — |
-| **API Gateway** | Forward JWT token for verification | `rpc VerifyToken(VerifyTokenRequest)` | gRPC (call to Auth Service) | — |
-| Auth Service | Register user | `/auth/register` | REST | POST |
-| Auth Service | Login | `/auth/login` | REST | POST |
-| Auth Service | Logout | `/auth/logout` | REST | POST |
-| Auth Service | Verify token (internal) | `rpc VerifyToken(VerifyTokenRequest)` | gRPC | — |
-| Patient Service | Get all patients | `/patients` | REST | GET |
-| Patient Service | Get patient by ID | `/patients/{id}` | REST | GET |
-| Patient Service | Create patient profile | `/patients` | REST | POST |
-| Patient Service | Update patient profile | `/patients/{id}` | REST | PUT |
-| Patient Service | Get patient (internal) | `rpc GetPatient(GetPatientRequest)` | gRPC | — |
-| Staff Service | Get all staff | `/staff` | REST | GET |
-| Staff Service | Get staff by ID | `/staff/{id}` | REST | GET |
-| Staff Service | Create doctor profile | `/staff/doctors` | REST | POST |
-| Staff Service | Create hospital staff profile | `/staff/hospital-staff` | REST | POST |
-| Staff Service | Get staff (internal) | `rpc GetStaff(GetStaffRequest)` | gRPC | — |
-| Appointment Service | Get all appointments | `/appointments` | REST | GET |
-| Appointment Service | Get appointment by ID | `/appointments/{id}` | REST | GET |
-| Appointment Service | Create appointment | `/appointments` | REST | POST |
-| Appointment Service | Update appointment | `/appointments/{id}` | REST | PUT |
-| Appointment Service | Create appointment report | `/appointments/{id}/report` | REST | POST |
-| Appointment Service | Get appointment report | `/appointments/{id}/report` | REST | GET |
-| Appointment Service | Get appointment (internal) | `rpc GetAppointment(GetAppointmentRequest)` | gRPC | — |
-| Appointment Service | Publish appointment report created | `appointment_report.created` | Kafka (publish) | — |
-| Medication Service | Get all medications | `/medications` | REST | GET |
-| Medication Service | Get medication by ID | `/medications/{id}` | REST | GET |
-| Medication Service | Create medication | `/medications` | REST | POST |
-| Medication Service | Create prescription | `/prescriptions` | REST | POST |
-| Medication Service | Get prescription by ID | `/prescriptions/{id}` | REST | GET |
-| Medication Service | Add prescription item | `/prescriptions/{id}/items` | REST | POST |
-| Medication Service | Get prescription items | `/prescriptions/{id}/items` | REST | GET |
-| Medication Service | Get medication schedules | `/schedules` | REST | GET |
-| Medication Service | Confirm medication schedule | `/schedules/{id}/confirm` | REST | PUT |
-| Medication Service | Get schedule (internal) | `rpc GetMedicationSchedule(GetScheduleRequest)` | gRPC | — |
-| Medication Service | Consume appointment report created | `appointment_report.created` | Kafka (consume) | — |
-| Medication Service | Publish schedule due | `medication_schedule.due` | Kafka (publish) | — |
-| Medication Service | Publish schedule missed | `medication_schedule.missed` | Kafka (publish) | — |
-| Notification Service | Get notifications by recipient | `/notifications/{recipientId}` | REST | GET |
-| Notification Service | Mark notification as read | `/notifications/{id}/read` | REST | PUT |
-| Notification Service | Send reminder (internal) | `rpc SendReminder(SendReminderRequest)` | gRPC | — |
-| Notification Service | Consume schedule due | `medication_schedule.due` | Kafka (consume) | — |
-| Notification Service | Consume schedule missed | `medication_schedule.missed` | Kafka (consume) | — |
+| Service Candidate | Capability | Resource | HTTP Method |
+|------------------|-----------|----------|-------------|
+| Order Service | Validate Order | /orders/validate | POST |
+| Order Service | Create Order Record | /orders | POST |
+| Order Service | Retrieve Order Details | /orders/{id} | GET |
+| Order Service | Update Order Status | /orders/{id}/status | PUT |
+| Payment Service | Process Payment Transaction | /payments | POST |
+| Payment Service | Confirm Payment Status | /payments/{id}/confirm | GET |
+| Inventory Service | Check Inventory Availability | /inventory/check | GET |
+| Inventory Service | Update Inventory Stock | /inventory/{id} | PUT |
+| Notification Service | Send Confirmation Notification | /notifications/order-confirmation | POST |
+| Order Processing Task Service | Execute Order Processing Workflow | /order-processing | POST |
 
 ---
 
@@ -206,11 +163,9 @@ Map entities/processes to REST URI Resources.
 Based on Non-Functional Requirements (1.3) and Processing Requirements, identify cross-cutting utility logic or logic requiring high autonomy/performance.
 
 | Candidate | Type (Utility / Microservice) | Justification |
-|-----------|-------------------------------|---------------|
-| Auth Service | Utility Service | Cross-cutting concern: API Gateway calls `rpc VerifyToken` to authenticate every incoming request before routing to any downstream service; shared across the entire system |
-| API Gateway | Utility Service | Cross-cutting concern: single entry point for all client requests — handles routing, JWT forwarding to Auth Service, and load balancing; decouples clients from internal service topology |
-| Kafka Broker | Microservice | Asynchronous, high-performance event bus — decouples Appointment Service, Medication Service, and Notification Service; handles high-volume schedule trigger events (`appointment_report.created`, `medication_schedule.due`, `medication_schedule.missed`) without blocking the main business flow |
-| Notification Service | Microservice | High autonomy — supports multiple delivery channels (push notification, SMS, email); operates independently from the main business flow; triggered entirely by Kafka events; alerts both patients and doctors/hospital staff |
+|----------|------------------------------|--------------|
+| Notification Service | Utility Service | Cross-cutting reusable communication concern across business processes |
+| Payment Service | Microservice | Requires enhanced security, independent scalability, and fault isolation |
 
 ---
 
@@ -229,16 +184,22 @@ sequenceDiagram
 
     Client->>OrderProcessingTaskService: Submit Order
 
+    OrderProcessingTaskService->>OrderService: Validate Order
+    OrderService-->>OrderProcessingTaskService: Order Validated
+
     OrderProcessingTaskService->>OrderService: Create Order Record
     OrderService-->>OrderProcessingTaskService: Order Created
 
     OrderProcessingTaskService->>PaymentService: Process Payment Transaction
     PaymentService-->>OrderProcessingTaskService: Payment Confirmed
 
+    OrderProcessingTaskService->>InventoryService: Check Inventory Availability
+    InventoryService-->>OrderProcessingTaskService: Inventory Available
+
     OrderProcessingTaskService->>InventoryService: Update Inventory Stock
     InventoryService-->>OrderProcessingTaskService: Inventory Updated
 
-    OrderProcessingTaskService->>NotificationService: Send Order Confirmation Notification
+    OrderProcessingTaskService->>NotificationService: Send Confirmation Notification
     NotificationService-->>OrderProcessingTaskService: Notification Sent
 
     OrderProcessingTaskService-->>Client: Return Order Confirmation
