@@ -14,8 +14,8 @@
 
 | Name | Student ID | Role | Contribution |
 |------|------------|------|-------------|
-|      |            |      |             |
-
+|  Ngô Vũ Minh Quý  |   B22DCVT427         |Member      |             |
+|  Hoàng Minh Đức   |   B22DCCN225         |Member      |             |
 ---
 
 ## Business Process
