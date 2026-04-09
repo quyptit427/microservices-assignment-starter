@@ -67,18 +67,15 @@ List existing systems, databases, or legacy logic related to this process.
 
 Non-functional requirements serve as input for identifying Utility Service and Microservice Candidates in step 2.7.
 
-| Requirement    | Description                                         |
-|----------------|-----------------------------------------------------|
-| Performance | API response time under 500ms for most requests; reminder notifications delivered within 1 minute of scheduled time |
-| Scalability | Support up to 100 concurrent users; each microservice can be scaled independently if needed |
-| Availability | 95% uptime during development and demo phases; basic error handling and service restart on failure |
-| Security | JWT-based authentication, HTTPS for all API calls, role-based access control (patient/doctor/staff), basic input validation |
-| Maintainability | Codebase separated by microservice with clear README per service; use of Git for version control and collaboration among 3 team members |
-| Usability | Simple and intuitive UI requiring minimal technical knowledge for patients and doctors to navigate |
----
+| Requirement | Description |
+|------------|-------------|
+| Performance | API response time under 500ms for standard operations; order processing workflow completed within 2 seconds under normal load |
+| Scalability | Support up to 100 concurrent users; services can scale independently based on workload demand |
+| Availability | 95% uptime during development and demo phases; basic retry and recovery mechanisms for failed service interactions |
+| Security | HTTPS for all API calls, secure payment transaction handling, input validation for all request payloads |
+| Maintainability | Service-oriented codebase separated by service/domain with version control and clear documentation for team collaboration |
+| Usability | Simple and intuitive user interface enabling customers to place and track orders with minimal effort |
 
-
-## Part 2 — REST/Microservices Modeling
 
 # Part 2 — REST/Microservices Modeling
 
@@ -267,32 +264,4 @@ docs/api-specs/order-processing-task-service.yaml
 | /order-processing/{id} | GET | application/json | 200, 404 |
 
 ### 3.2 Service Logic Design
-
-Internal processing flow for each service.
-
-**Authentication Service:**
-
-![Auth Flow](asset/AuthService.png)
-
-**Patient Service:**
-
-![Patient Flow](asset/PatientService.png)
-
-**Staff Service:**
-
-![Staff Flow](asset/StaffService.png)
-
-**Appointment Service:**
-
-![Appointment Flow](asset/AppointmentService.png)
-
-**Medication Service:**
-
-![Medication Flow](asset/MedicationService.png)
-
-**Notification Service:**
-
-![Notification Flow](asset/NotiService.png)
-
----
 
