@@ -1,6 +1,6 @@
-# System Architecture
+# System Architecture — Order Processing
 
-> This document is completed **after** [Analysis and Design](analysis-and-design.md).
+> This document is completed **after** [Analysis and Design](analysis-and-design-order-processing.md).
 > Based on the Service Candidates and Non-Functional Requirements identified there, select appropriate architecture patterns and design the deployment architecture.
 
 **References:**
@@ -12,16 +12,17 @@
 
 ## 1. Pattern Selection
 
-| Pattern | Selected? | Business/Technical Justification |
-|---------|-----------|----------------------------------|
-| API Gateway | ✅ | Single entry point for all client requests; Nginx proxies to internal services by path prefix; decouples frontend from internal service topology |
-| Database per Service | ✅ | Each service owns its own PostgreSQL database — prevents coupling at the data layer and enables independent deployability |
-| Shared Database | ❌ | Rejected — would couple services at the data layer and eliminate independent deployability |
-| Saga (Orchestration) | ✅ | Booking Service orchestrates a multi-step transaction spanning Schedule, Room, and Customer services; cancel saga (compensating transaction) calls Customer Service to restore points first, then commits local state changes (tickets + bill) atomically |
-| Event-driven / Message Queue | ❌ | Out of scope for MVP — synchronous REST calls are sufficient; no async requirements |
+| Pattern | Selected? | Business / Technical Justification |
+|---------|-----------|-------------------------------------|
+| API Gateway | ✅ | Single entry point for all client requests; Nginx routes `/api/*` to the correct internal service by path prefix; handles JWT validation, CORS, and rate limiting; decouples frontend from internal service topology |
+| Database per Service | ✅ | Each service owns its own isolated database (PostgreSQL or Redis) — prevents data-layer coupling and enables independent deployability and scaling |
+| Shared Database | ❌ | Rejected — would couple services at the data layer, eliminate independent deployability, and create schema conflicts between domains |
+| Saga (Orchestration) | ✅ | Order Service orchestrates a multi-step transaction spanning Cart, Inventory, Customer, and Payment services; Cancel Saga applies compensating transactions (restore inventory → refund payment → update order status) |
+| Event-driven / Message Queue | ❌ | Out of scope for MVP — synchronous REST calls are sufficient; Notification Service uses fire-and-forget HTTP POST rather than a full message broker |
 | CQRS | ❌ | Read/write ratio does not justify the added complexity at this scale |
-| Circuit Breaker | ❌ | Not implemented — failures surface as 503 immediately (fail-fast); acceptable for MVP |
-| Service Registry / Discovery | ❌ | Docker Compose DNS provides static service discovery via service names — no dynamic registry needed |
+| Circuit Breaker | ❌ | Not implemented — failures surface as 503 immediately (fail-fast); acceptable for MVP scope |
+| Service Registry / Discovery | ❌ | Docker Compose DNS provides static service discovery via service names (e.g., `http://inventory-service:5004`) — no dynamic registry needed |
+| Redis Cache | ✅ | Inventory Service uses Redis for atomic stock operations (INCRBY / DECRBY) to prevent oversell under concurrent orders; Cart Service uses Redis as primary store (hash per customer, TTL 7 days) |
 
 > Reference: *Microservices Patterns* — Chris Richardson, chapters on decomposition, data management, and communication patterns.
 
@@ -31,13 +32,15 @@
 
 | Component | Responsibility | Tech Stack | Port |
 |-----------|----------------|------------|------|
-| **Frontend** | SPA for customers to browse movies, view schedules, book and cancel tickets | HTML + Tailwind + Vanilla JS | 4000 |
-| **API Gateway** | Reverse proxy — routes `/api/*` requests to the correct internal service; handles CORS | Nginx | 8082 |
-| **Movie Service** | Owns movie catalog — read-only access for customers to browse movies | FastAPI + PostgreSQL | 5001 |
-| **Room Service** | Owns screening rooms and seats; called internally by Schedule and Booking Services | FastAPI + PostgreSQL | 5004 |
-| **Schedule Service** | Owns showtime lifecycle — exposes schedules to customers; called by Booking Service during saga | FastAPI + PostgreSQL | 5005 |
-| **Customer Service** | Owns customer profile and loyalty point balance; called by Booking Service during saga | FastAPI + PostgreSQL | 5003 |
-| **Booking Service** | Orchestrates booking saga; owns transactional data (bills, tickets); handles compensating transactions on cancel | FastAPI + PostgreSQL | 5002 |
+| **Frontend** | Responsive SPA for customers to browse products, manage cart, place and cancel orders | HTML + Tailwind + Vanilla JS | 3000 |
+| **API Gateway** | Reverse proxy — routes `/api/*` requests to the correct internal service; handles JWT validation, CORS, and rate limiting | Nginx | 8080 |
+| **Product Service** | Owns product catalog and categories — read-only access for customers to browse and search products | FastAPI + PostgreSQL | 5001 |
+| **Cart Service** | Owns shopping cart state per customer — add, update, remove items; stores cart in Redis with 7-day TTL | FastAPI + Redis | 5002 |
+| **Customer Service** | Owns customer profiles, delivery addresses, and internal wallet balance; called by Order Service during saga | FastAPI + PostgreSQL | 5003 |
+| **Inventory Service** | Owns stock levels per product; uses Redis atomic ops to reserve and restore stock; critical path for preventing oversell | FastAPI + PostgreSQL + Redis | 5004 |
+| **Order Service** | Orchestrates Order Saga; owns transactional data (orders, order_items); handles Cancel Saga compensating transactions | FastAPI + PostgreSQL | 5005 |
+| **Payment Service** | Owns payment records; processes COD acknowledgement and wallet deduction; handles refunds on cancel | FastAPI + PostgreSQL | 5006 |
+| **Notification Service** | Sends order confirmation and status-change notifications via email / push; called asynchronously (fire-and-forget) | FastAPI + PostgreSQL | 5007 |
 
 ---
 
@@ -45,17 +48,19 @@
 
 ### Inter-service Communication Matrix
 
-| From → To | Movie | Room | Schedule | Customer | Booking | Gateway | DB (own) |
-|-----------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Frontend** | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ REST | ❌ |
-| **API Gateway** | ✅ proxy `/api/movies` | ✅ proxy `/api/rooms` | ✅ proxy `/api/schedules` | ✅ proxy `/api/customers` | ✅ proxy `/api/booking`, `/api/bills`, `/api/tickets` | — | ❌ |
-| **Movie Service** | — | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| **Room Service** | ❌ | — | ❌ | ❌ | ❌ | ❌ | ✅ |
-| **Schedule Service** | ❌ | ✅ GET /rooms/{id}/seats | — | ❌ | ❌ | ❌ | ✅ |
-| **Customer Service** | ❌ | ❌ | ❌ | — | ❌ | ❌ | ✅ |
-| **Booking Service** | ❌ | ✅ GET /rooms/{id}/seats | ✅ GET /schedules/{id} | ✅ GET+POST /customers, PATCH /points | — | ❌ | ✅ |
+| From → To | Product | Cart | Customer | Inventory | Order | Payment | Notification | Gateway | DB (own) |
+|-----------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **Frontend** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ REST | ❌ |
+| **API Gateway** | ✅ proxy `/api/products` | ✅ proxy `/api/carts` | ✅ proxy `/api/customers` | ✅ proxy `/api/inventory` | ✅ proxy `/api/orders` | ✅ proxy `/api/payments` | ❌ | — | ❌ |
+| **Product Service** | — | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ PG |
+| **Cart Service** | ❌ | — | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ Redis |
+| **Customer Service** | ❌ | ❌ | — | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ PG |
+| **Inventory Service** | ❌ | ❌ | ❌ | — | ❌ | ❌ | ❌ | ❌ | ✅ PG + Redis |
+| **Order Service** | ❌ | ✅ GET cart, DELETE cart | ✅ GET customer | ✅ POST reserve, POST restore | — | ✅ POST payment, POST refund | ✅ POST notify (async) | ❌ | ✅ PG |
+| **Payment Service** | ❌ | ❌ | ✅ PATCH wallet | ❌ | ❌ | — | ❌ | ❌ | ✅ PG |
+| **Notification Service** | ❌ | ❌ | ✅ GET customer (email) | ❌ | ❌ | ❌ | — | ❌ | ✅ PG |
 
-> All inter-service calls use synchronous HTTP/REST over Docker Compose internal DNS (e.g., `http://schedule-service:5005`).
+> All inter-service calls use synchronous HTTP/REST over Docker Compose internal DNS, except Notification Service calls which are fire-and-forget (Order Service does not await response).
 
 ---
 
@@ -63,35 +68,66 @@
 
 ```mermaid
 graph LR
-    U[User/Browser] --> FE[Frontend :4000]
-    FE --> GW[API Gateway :8082]
+    U[User/Browser] --> FE[Frontend :3000]
+    FE --> GW[API Gateway :8080]
 
-    GW -->|movies| MO[Movie Service :5001]
-    GW -->|rooms| RO[Room Service :5004]
-    GW -->|schedules| SD[Schedule Service :5005]
-    GW -->|customers| CU[Customer Service :5003]
-    GW -->|booking, bills, tickets| BO[Booking Service :5002]
+    GW -->|/api/products| PS[Product Service :5001]
+    GW -->|/api/carts| CS[Cart Service :5002]
+    GW -->|/api/customers| CU[Customer Service :5003]
+    GW -->|/api/inventory| IV[Inventory Service :5004]
+    GW -->|/api/orders| OS[Order Service :5005]
+    GW -->|/api/payments| PY[Payment Service :5006]
 
-    MO --> DBMO[(DB Movie)]
-    RO --> DBRO[(DB Room)]
-    SD --> DBSD[(DB Schedule)]
-    CU --> DBCU[(DB Customer)]
-    BO --> DBBO[(DB Booking)]
+    PS --> DBPS[(PostgreSQL\nProduct DB)]
+    CS --> DBCS[(Redis\nCart Store)]
+    CU --> DBCU[(PostgreSQL\nCustomer DB)]
+    IV --> DBIV[(PostgreSQL\nInventory DB)]
+    IV --> RDBIV[(Redis\nStock Cache)]
+    OS --> DBOS[(PostgreSQL\nOrder DB)]
+    PY --> DBPY[(PostgreSQL\nPayment DB)]
+    NS[Notification Service :5007] --> DBNS[(PostgreSQL\nNotif DB)]
+    NS --> DBCU2[(PostgreSQL\nCustomer DB\nread-only)]
 
-    SD -.->|GET rooms by id| RO
-    BO -.->|GET schedule by id| SD
-    BO -.->|GET rooms by id| RO
-    BO -.->|GET+POST customers, PATCH points| CU
+    OS -.->|GET /carts, DELETE /carts| CS
+    OS -.->|GET /customers| CU
+    OS -.->|POST /reserve, POST /restore| IV
+    OS -.->|POST /payments, POST /refund| PY
+    OS -.->|POST /notifications async| NS
+    PY -.->|PATCH /wallet| CU
 ```
 
-> Solid lines = client-initiated requests via Gateway. Dashed lines = internal service-to-service calls (Booking Saga).
+> Solid lines = client-initiated requests via Gateway. Dashed lines = internal service-to-service calls (Order Saga and Cancel Saga).
 
 ---
 
-## 5. Deployment
+## 5. Saga Flow Summary
 
-- All services containerized with Docker
-- Orchestrated via Docker Compose
-- Single command: `docker compose up --build`
-- Service DNS resolution via Docker Compose network (e.g., `http://schedule-service:5005`)
-- Each service has `GET /health` → `{"status": "ok"}` for liveness checks
+### Order Saga — Happy Path
+
+```
+Order Service
+  │
+  ├─► Cart Service          GET /carts/{customer_id}            → CartItem[]
+  ├─► Inventory Service     POST /inventory/reserve             → 200 OK | 409
+  ├─► Customer Service      GET /customers/{id}                 → Customer
+  │   [validate voucher, calculate total]
+  │   [INSERT Order PENDING + OrderItems]
+  ├─► Payment Service       POST /payments                      → Payment
+  │   [UPDATE Order → CONFIRMED, COMMIT]
+  ├─► Cart Service          DELETE /carts/{customer_id}         (async)
+  └─► Notification Service  POST /notifications ORDER_CONFIRMED (async, fire-and-forget)
+```
+
+### Cancel Saga — Compensating Transactions
+
+```
+Order Service
+  │   [validate: status must be PENDING or CONFIRMED]
+  ├─► Inventory Service     POST /inventory/restore             → 200 OK
+  ├─► Payment Service       POST /payments/{id}/refund          → 200 OK (WALLET only)
+  │   [UPDATE Order → CANCELLED, COMMIT]
+  └─► Notification Service  POST /notifications ORDER_CANCELLED (async, fire-and-forget)
+```
+
+---
+
