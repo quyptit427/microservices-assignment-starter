@@ -1,9 +1,9 @@
-# Analysis and Design — Movie Ticket Booking System
+# Analysis and Design — Order Processing System
 
 > **Goal**: Analyze a specific business process and design a service-oriented automation solution (SOA/Microservices).
 > Scope: 4–6 week assignment — focus on **one business process**, not an entire system.
 >
-> **Target decomposition**: 5 microservices — **Movie, Room, Schedule, Customer, Booking**.
+> **Target decomposition**: 7 microservices — **Product · Cart · Customer · Inventory · Order · Payment · Notification**
 
 **References:**
 1. *Service-Oriented Architecture: Analysis and Design for Services and Microservices* — Thomas Erl (2nd Edition)
@@ -16,40 +16,43 @@
 
 ### 1.1 Business Process Definition
 
-Describe or diagram the high-level Business Process to be automated.
+Describe the high-level Business Process to be automated.
 
-- **Domain**: Entertainment / Cinema
+- **Domain**: Ecommerce — Online Grocery / General Retail Supermarket
 
-- **Business Process**: Movie Ticket Booking
+- **Business Process**: Order Processing
 
 - **Actors**:
-
-  - Customers
+  - Customer (end-user placing orders)
+  - System (automated backend logic)
 
 - **Scope**:
 
-    ***In Scope:***
-    - Browsing movies and available screening schedules
-    - Viewing seat availability for a specific schedule
-    - Booking one or more seats for a schedule (with loyalty point discount)
-    - Automatic creation of ticket bill and tickets after successful booking
-    - Canceling a booking and restoring used loyalty points
+  ***In Scope:***
+  - Browsing product catalog by category, filtering and sorting
+  - Searching products by keyword
+  - Managing shopping cart (add, update quantity, remove, clear)
+  - Applying voucher / discount codes
+  - Selecting delivery address and payment method (COD or internal wallet)
+  - Checking stock availability per cart item
+  - Calculating order total: subtotal + shipping fee − discount
+  - Reserving / deducting inventory upon successful order placement
+  - Creating an Order record (PENDING → CONFIRMED → SHIPPING → DELIVERED)
+  - Processing payment: COD acknowledgement or wallet deduction
+  - Canceling an order (before SHIPPING) with inventory restoration and refund
+  - Sending notifications on order confirmation and status changes
 
-    ***Out of Scope:***
-    - Online payment gateway integration (e.g., VNPay, Momo)
-    - Email or SMS notification to customers
-    - Customer account registration with password
-    - Reporting and analytics dashboard
-    - Multi-cinema / multi-branch support
-    - Staff management of movies, rooms, seats, and schedules
-    - Staff check-in of tickets at the cinema entrance
-    - Staff authentication
+  ***Out of Scope:***
+  - External payment gateway integration (VNPay, MoMo, Stripe)
+  - Supplier / procurement management
+  - Revenue reporting and analytics dashboard
+  - Staff / warehouse authentication and management
+  - Loyalty / reward point system
+  - Multi-branch / multi-warehouse support
+  - Admin product catalog management (CRUD)
+  - Physical delivery by shipper
 
 ---
-
-**Process Diagram:**
-
-![Class Diagram](classdiagram.png)
 
 ### 1.2 Existing Automation Systems
 
@@ -59,22 +62,25 @@ Describe or diagram the high-level Business Process to be automated.
 |-------------|------|--------------|-------------------|
 | None | — | — | — |
 
+---
+
 ### 1.3 Non-Functional Requirements
 
 Non-functional requirements serve as input for identifying Utility Service and Microservice Candidates in step 2.7.
 
 | Requirement | Description |
 |-------------|-------------|
-| Performance | API response time under 500ms for most requests; booking transaction completes within 1 second |
-| Scalability | Each microservice can be scaled independently; supports concurrent seat booking without double-booking |
-| Availability | Services restart automatically on failure; health check endpoint on every service |
-| Security | Input validation on all endpoints; shared secret between services for internal calls |
-| Maintainability | Codebase separated by microservice with clear README per service; Git version control |
-| Usability | Simple SPA interface requiring no technical knowledge for customers to browse and book tickets |
+| **Performance** | API response < 500ms for browse/search; full order placement completes within 2s including stock check and order write |
+| **Scalability** | Each microservice scales independently; supports flash-sale traffic with thousands of concurrent orders without overselling |
+| **Availability** | Auto-restart on service failure; `/health` endpoint on every service; Inventory Service uses Redis to serve stock reads from cache |
+| **Consistency** | Saga pattern for order placement; Inventory Service uses atomic Redis operations + optimistic locking to prevent double-booking |
+| **Security** | Input validation on all endpoints; JWT authentication at API Gateway; shared internal secret between services |
+| **Maintainability** | Each microservice has its own codebase and README; Git version control; full OpenAPI spec per service |
+| **Usability** | Responsive SPA (mobile-first); no technical knowledge required to browse, add to cart, and place an order |
 
 ---
 
-## Part 2 — REST/Microservices Modeling
+## Part 2 — REST / Microservices Modeling
 
 ### 2.1 Decompose Business Process & 2.2 Filter Unsuitable Actions
 
@@ -82,21 +88,29 @@ Decompose the process from 1.1 into granular actions. Mark actions unsuitable fo
 
 | # | Action | Actor | Description | Suitable? |
 |---|--------|-------|-------------|-----------|
-| 1 | Browse movies | Customer | Customer views list of currently showing movies | ✅ |
-| 2 | View schedules | Customer | Customer views available showtimes for a selected movie | ✅ |
-| 3 | View seat map | Customer | Customer views available/booked seats for a schedule | ✅ |
-| 4 | Select seats | Customer | Customer selects one or more available seats | ✅ |
-| 5 | Enter booking info | Customer | Customer enters phone number, name, and loyalty points to use | ✅ |
-| 6 | Validate movie, schedule & seats | System | System verifies schedule exists, seats belong to the correct room, and movie-room mapping is valid | ✅ |
-| 7 | Check seat availability | System | System checks no active ticket exists for the same schedule + seat | ✅ |
-| 8 | Calculate payment | System | System computes total, discount from points, paid amount, change | ✅ |
-| 9 | Create ticket bill | System | System creates a TicketBill record (pending → paid) | ✅ |
-| 10 | Create tickets | System | System creates one Ticket per selected seat linked to the bill | ✅ |
-| 11 | Award loyalty points | System | System deducts used points and awards earned points to customer | ✅ |
-| 12 | Cancel booking | Customer | Customer requests cancellation of a booking | ✅ |
-| 13 | Restore points on cancel | System | System restores used points and removes earned points (compensation) | ✅ |
+| 1 | Browse products | Customer | View product list by category, filter by price, sort results | ✅ |
+| 2 | Search products | Customer | Full-text search by product name or keyword | ✅ |
+| 3 | View product detail | Customer | See images, description, price, and current stock | ✅ |
+| 4 | Add to cart | Customer | Add a product with quantity; accumulate if item already in cart | ✅ |
+| 5 | Update cart | Customer | Change item quantity or remove item from cart | ✅ |
+| 6 | Apply voucher | Customer | Enter discount code; system validates and computes discount amount | ✅ |
+| 7 | Select delivery address | Customer | Choose a saved address or enter a new one | ✅ |
+| 8 | Select payment method | Customer | Choose COD or internal wallet | ✅ |
+| 9 | Check stock availability | System | Verify each cart item has sufficient inventory | ✅ |
+| 10 | Calculate order total | System | Compute subtotal + shipping fee − discount = total | ✅ |
+| 11 | Reserve / deduct inventory | System | Atomically reduce stock for each item to prevent oversell | ✅ |
+| 12 | Create Order | System | Insert Order record (status: PENDING) with items and total | ✅ |
+| 13 | Process payment | System | COD: record pending acknowledgement; Wallet: deduct balance | ✅ |
+| 14 | Confirm order | System | Transition order status to CONFIRMED after successful payment | ✅ |
+| 15 | Clear cart | System | Remove all items from customer's cart after order is confirmed | ✅ |
+| 16 | Send notification | System | Deliver email / push notification for order confirmation | ✅ |
+| 17 | Track order status | Customer | Customer views current order status | ✅ |
+| 18 | Cancel order | Customer | Request cancellation (only allowed before SHIPPING) | ✅ |
+| 19 | Restore inventory on cancel | System | Return reserved stock for each item (compensating transaction) | ✅ |
+| 20 | Refund on cancel | System | Refund amount to wallet if payment was pre-collected (non-COD) | ✅ |
+| 21 | Physical delivery | Staff | Actual parcel delivery by shipper — manual, out of automation scope | ❌ |
 
-> Actions marked ❌: manual-only, require human interaction, or are pure UI state — cannot be encapsulated as a service.
+> Actions marked ❌: manual-only, require human physical action — cannot be encapsulated as a service.
 
 ---
 
@@ -106,14 +120,13 @@ Identify business entities and group reusable (agnostic) actions into Entity Ser
 
 | Entity | Service Candidate | Agnostic Actions |
 |--------|-------------------|------------------|
-| Movie | Movie Service | Get all movies, get movie by ID |
-| Room | Room Service | Get all rooms, get room by ID |
-| Seat | Room Service | Get seats by room, get seat by ID |
-| Schedule | Schedule Service | Get all schedules (filter by movie), get schedule by ID, get seats for schedule |
-| Customer | Customer Service | Register customer, get customer by ID, get customer by phone number |
-| LoyaltyPoints | Customer Service | Deduct points, award points, get point balance |
-| TicketBill | Booking Service | Get bill by ID, get all bills for customer |
-| Ticket | Booking Service | Get ticket by ID |
+| Product, Category | **Product Service** | List products, get product by ID, search products, list categories, get products by category |
+| Cart, CartItem | **Cart Service** | Get cart by customer, add item, update item quantity, remove item, clear cart |
+| Customer, Address | **Customer Service** | Register customer, get by ID/email/phone, manage addresses, get & update wallet balance |
+| Inventory | **Inventory Service** | Check stock by product, reserve stock (atomic), deduct stock, restore stock on cancel |
+| Order, OrderItem | **Order Service** | Get order by ID, list orders by customer, update order status |
+| Payment | **Payment Service** | Create payment record, process COD, process wallet payment, refund payment |
+| Notification | **Notification Service** | Send order-confirmed notification, send status-update notification |
 
 ---
 
@@ -123,36 +136,41 @@ Group process-specific (non-agnostic) actions into Task Service Candidates.
 
 | Non-agnostic Action | Task Service Candidate |
 |---------------------|------------------------|
-| Validate movie + schedule + seats → check availability → create bill + tickets → process points → commit | **Booking Saga** — `POST /booking` in Booking Service; orchestrates cross-service validation (Schedule Service + Room Service + Customer Service) and local DB writes atomically |
-| Cancel booking: mark tickets canceled + restore loyalty points (compensating transaction) | **Cancel Saga** — `POST /booking/{id}/cancel` in Booking Service; compensates the booking saga by calling Customer Service to restore points |
+| Validate cart → check stock → get customer → validate voucher → calculate total → reserve inventory → create order → process payment → confirm order → clear cart → notify | **Order Saga** — `POST /orders` in Order Service; orchestrates cross-service coordination: Cart, Inventory, Customer, Payment, Notification |
+| Cancel order: validate cancellable status → restore inventory → refund payment → update status → notify | **Cancel Saga** — `POST /orders/{id}/cancel` in Order Service; compensating transaction restoring inventory and refunding payment |
 
 ---
 
 ### 2.5 Identify Resources
 
-Map entities/processes to REST URI Resources.
+Map entities / processes to REST URI Resources.
 
 | Entity / Process | Resource URI | Service |
 |------------------|--------------|---------|
 | Health check | `/health` | All services |
-| Movie list | `/movies` | Movie Service |
-| Movie detail | `/movies/{id}` | Movie Service |
-| Room list | `/rooms` | Room Service |
-| Room detail | `/rooms/{id}` | Room Service |
-| Seats in room | `/rooms/{id}/seats` | Room Service |
-| Schedule list | `/schedules` | Schedule Service |
-| Schedule detail | `/schedules/{id}` | Schedule Service |
-| Seats for schedule | `/schedules/{id}/seats` | Schedule Service |
-| Customer register | `/customers` | Customer Service |
+| Product list | `/products` | Product Service |
+| Product detail | `/products/{id}` | Product Service |
+| Search products | `/products/search?q=` | Product Service |
+| Category list | `/categories` | Product Service |
+| Products by category | `/categories/{id}/products` | Product Service |
+| Cart | `/carts/{customer_id}` | Cart Service |
+| Cart items | `/carts/{customer_id}/items` | Cart Service |
+| Cart item | `/carts/{customer_id}/items/{product_id}` | Cart Service |
+| Register customer | `/customers` | Customer Service |
 | Customer by ID | `/customers/{id}` | Customer Service |
-| Customer by phone | `/customers/phone/{phone}` | Customer Service |
-| Update customer points | `/customers/{id}/points` | Customer Service |
-| Book tickets (Saga) | `/booking` | Booking Service |
-| Cancel booking | `/booking/{id}/cancel` | Booking Service |
-| Available seats | `/booking/schedule/{id}/available-seats` | Booking Service |
-| Bill detail | `/bills/{id}` | Booking Service |
-| Bills by customer | `/bills/customer/{id}` | Booking Service |
-| Ticket detail | `/tickets/{id}` | Booking Service |
+| Customer addresses | `/customers/{id}/addresses` | Customer Service |
+| Customer wallet | `/customers/{id}/wallet` | Customer Service |
+| Stock by product | `/inventory/{product_id}` | Inventory Service |
+| Reserve stock | `/inventory/reserve` | Inventory Service |
+| Restore stock | `/inventory/restore` | Inventory Service |
+| Place order (Saga) | `/orders` | Order Service |
+| Order detail | `/orders/{id}` | Order Service |
+| Orders by customer | `/orders/customer/{customer_id}` | Order Service |
+| Cancel order (Compensation) | `/orders/{id}/cancel` | Order Service |
+| Create payment | `/payments` | Payment Service |
+| Payment detail | `/payments/{id}` | Payment Service |
+| Refund payment | `/payments/{id}/refund` | Payment Service |
+| Send notification | `/notifications` | Notification Service |
 
 ---
 
@@ -160,118 +178,174 @@ Map entities/processes to REST URI Resources.
 
 | Service Candidate | Capability | Resource | Protocol | HTTP Method | Response Codes |
 |-------------------|------------|----------|----------|-------------|----------------|
-| **API Gateway** | Route & forward all client requests | All `/api/*` routes | REST (proxy) | — | — |
-| Movie Service | Health check | `/health` | REST | GET | 200 |
-| Movie Service | List movies | `/movies` | REST | GET | 200 |
-| Movie Service | Get movie | `/movies/{id}` | REST | GET | 200, 404 |
-| Room Service | Health check | `/health` | REST | GET | 200 |
-| Room Service | List rooms | `/rooms` | REST | GET | 200 |
-| Room Service | Get room | `/rooms/{id}` | REST | GET | 200, 404 |
-| Room Service | List seats in room | `/rooms/{id}/seats` | REST | GET | 200, 404 |
-| Schedule Service | Health check | `/health` | REST | GET | 200 |
-| Schedule Service | List schedules | `/schedules` | REST | GET | 200 |
-| Schedule Service | Get schedule | `/schedules/{id}` | REST | GET | 200, 404 |
-| Schedule Service | Get seats for schedule | `/schedules/{id}/seats` | REST | GET | 200, 404 |
+| **API Gateway** | Route, JWT validate, rate-limit all client requests | All `/api/*` routes | REST (proxy) | — | — |
+| Product Service | Health check | `/health` | REST | GET | 200 |
+| Product Service | List products | `/products` | REST | GET | 200 |
+| Product Service | Get product | `/products/{id}` | REST | GET | 200, 404 |
+| Product Service | Search products | `/products/search` | REST | GET | 200 |
+| Product Service | List categories | `/categories` | REST | GET | 200 |
+| Product Service | Products by category | `/categories/{id}/products` | REST | GET | 200, 404 |
+| Cart Service | Health check | `/health` | REST | GET | 200 |
+| Cart Service | Get cart | `/carts/{cid}` | REST | GET | 200, 404 |
+| Cart Service | Add item | `/carts/{cid}/items` | REST | POST | 200, 400 |
+| Cart Service | Update item | `/carts/{cid}/items/{pid}` | REST | PATCH | 200, 404 |
+| Cart Service | Remove item | `/carts/{cid}/items/{pid}` | REST | DELETE | 200, 404 |
+| Cart Service | Clear cart | `/carts/{cid}` | REST | DELETE | 200 |
 | Customer Service | Health check | `/health` | REST | GET | 200 |
 | Customer Service | Register customer | `/customers` | REST | POST | 201, 400 |
 | Customer Service | Get customer by ID | `/customers/{id}` | REST | GET | 200, 404 |
-| Customer Service | Get customer by phone | `/customers/phone/{phone}` | REST | GET | 200, 404 |
-| Customer Service | Update loyalty points | `/customers/{id}/points` | REST | PATCH | 200, 400, 404 |
-| Booking Service | Health check | `/health` | REST | GET | 200 |
-| Booking Service | **Book tickets (Saga)** | `/booking` | REST | POST | 201, 400, 409, 503 |
-| Booking Service | **Cancel booking (Compensation)** | `/booking/{id}/cancel` | REST | POST | 200, 400, 404 |
-| Booking Service | Available seats | `/booking/schedule/{id}/available-seats` | REST | GET | 200, 503 |
-| Booking Service | Get bill | `/bills/{id}` | REST | GET | 200, 404 |
-| Booking Service | Get bills by customer | `/bills/customer/{id}` | REST | GET | 200 |
-| Booking Service | Get ticket | `/tickets/{id}` | REST | GET | 200, 404 |
+| Customer Service | Add address | `/customers/{id}/addresses` | REST | POST | 201, 400 |
+| Customer Service | Update wallet | `/customers/{id}/wallet` | REST | PATCH | 200, 400, 404 |
+| Inventory Service | Health check | `/health` | REST | GET | 200 |
+| Inventory Service | Check stock | `/inventory/{product_id}` | REST | GET | 200, 404 |
+| Inventory Service | **Reserve stock** | `/inventory/reserve` | REST | POST | 200, 409 |
+| Inventory Service | **Restore stock** | `/inventory/restore` | REST | POST | 200 |
+| Order Service | Health check | `/health` | REST | GET | 200 |
+| Order Service | **Place order (Saga)** | `/orders` | REST | POST | 201, 400, 409, 503 |
+| Order Service | **Cancel order (Compensation)** | `/orders/{id}/cancel` | REST | POST | 200, 400, 404 |
+| Order Service | Get order | `/orders/{id}` | REST | GET | 200, 404 |
+| Order Service | List orders by customer | `/orders/customer/{id}` | REST | GET | 200 |
+| Payment Service | Health check | `/health` | REST | GET | 200 |
+| Payment Service | Create payment | `/payments` | REST | POST | 201, 400 |
+| Payment Service | Get payment | `/payments/{id}` | REST | GET | 200, 404 |
+| Payment Service | **Refund payment** | `/payments/{id}/refund` | REST | POST | 200, 400, 404 |
+| Notification Service | Health check | `/health` | REST | GET | 200 |
+| Notification Service | Send notification | `/notifications` | REST | POST | 202 |
 
 ---
 
 ### 2.7 Utility Service & Microservice Candidates
 
-Based on Non-Functional Requirements (1.3) and Processing Requirements, identify cross-cutting utility logic or logic requiring high autonomy/performance.
+Based on Non-Functional Requirements (1.3), identify cross-cutting utility logic or logic requiring high autonomy / performance.
 
 | Candidate | Type | Justification |
 |-----------|------|---------------|
-| API Gateway (Nginx) | Utility Service | Cross-cutting concern: single entry point for all client requests — handles routing and CORS; decouples frontend from internal service topology |
-| Movie Service | Entity Service | Manages the movie catalog domain; independent lifecycle and simple read operations exposed to customers |
-| Room Service | Entity Service | Owns screening rooms and seats; can scale independently from schedules and booking traffic |
-| Schedule Service | Entity Service | Owns showtime lifecycle; isolated bounded context with high read volume from customers |
-| Customer Service | Entity Service | Owns customer profile and loyalty point balance; called by Booking Service during saga |
-| Booking Service | Task Service | High autonomy — orchestrates the booking saga spanning multiple services; owns transactional data (bills, tickets); handles compensating transactions on cancel |
+| API Gateway (Nginx) | Utility Service | Single entry point: routing, JWT validation, CORS, rate limiting — decouples frontend from internal service topology |
+| Product Service | Entity Service | Owns product catalog; read-heavy with caching — can scale independently during flash sales |
+| Cart Service | Entity Service | Cart has a short lifecycle and is session-like; isolating it from Order prevents domain contamination |
+| Customer Service | Entity Service | Owns profile, addresses, and internal wallet balance; called by Order Service during saga |
+| Inventory Service | Entity Service | Critical path: stock accuracy is absolute; uses Redis atomic ops + optimistic locking to prevent oversell under concurrency |
+| Order Service | Task Service | High autonomy — orchestrates the full Order Saga across multiple services; owns transactional data (orders, order_items); handles compensating cancel saga |
+| Payment Service | Entity Service | Owns payment records; handles COD acknowledgement and wallet deduction; supports refund on cancel |
+| Notification Service | Utility Service | Async fire-and-forget notifications (email/push) — decoupled from main saga flow; never blocks order confirmation |
 
 ---
 
 ### 2.8 Service Composition Candidates
 
-Interaction diagram showing how Service Candidates collaborate to fulfill the business process.
+Interaction diagrams showing how Service Candidates collaborate to fulfill the business process.
+
+#### Order Saga — Place Order Flow
+
+```
+Customer → Frontend → API Gateway → Order Service
+                                        │
+                          ┌─────────────┼──────────────────┐
+                          ▼             ▼                  ▼
+                     Cart Service  Inventory Service  Customer Service
+                     GET /carts    POST /reserve      GET /customers/{id}
+                          │             │                  │
+                          └─────────────┴──────────────────┘
+                                        │
+                                  [Calculate total]
+                                  [INSERT Order(PENDING)]
+                                        │
+                                        ▼
+                                 Payment Service
+                                 POST /payments
+                                        │
+                                  [UPDATE Order→CONFIRMED]
+                                  [COMMIT]
+                                        │
+                          ┌─────────────┴──────────────┐
+                          ▼                            ▼
+                     Cart Service          Notification Service
+                  DELETE /carts/{id}     POST /notifications (async)
+```
 
 ```mermaid
 sequenceDiagram
     participant C as Customer
-    participant FE as Frontend :4000
-    participant GW as Gateway :8082
-    participant MO as Movie Service :5001
-    participant RO as Room Service :5004
-    participant SD as Schedule Service :5005
+    participant FE as Frontend :3000
+    participant GW as API Gateway :8080
+    participant PS as Product Service :5001
+    participant CS as Cart Service :5002
     participant CU as Customer Service :5003
-    participant BO as Booking Service :5002
+    participant IV as Inventory Service :5004
+    participant OS as Order Service :5005
+    participant PY as Payment Service :5006
+    participant NS as Notification Service :5007
 
-    %% Browse movies
+    %% Browse & search
     C->>FE: Open app
-    FE->>GW: GET /api/movies
-    GW->>MO: GET /movies
-    MO-->>GW: Movie[]
-    GW-->>FE: Movie[]
+    FE->>GW: GET /api/products
+    GW->>PS: GET /products
+    PS-->>GW: Product[]
+    GW-->>FE: Product[]
 
-    %% View schedules & seat map
-    C->>FE: Select movie → select schedule
-    FE->>GW: GET /api/schedules?movie_id={id}
-    GW->>SD: GET /schedules?movie_id={id}
-    SD-->>GW: Schedule[]
-    GW-->>FE: Schedule[]
-    FE->>GW: GET /api/booking/schedule/{id}/available-seats
-    GW->>BO: GET /booking/schedule/{id}/available-seats
-    BO->>SD: GET /schedules/{id}
-    SD-->>BO: Schedule(room_id, movie_id)
-    BO->>RO: GET /rooms/{room_id}/seats
-    RO-->>BO: Seat[]
-    BO-->>GW: available_seat_ids[]
-    GW-->>FE: available_seat_ids[]
+    %% Cart management
+    C->>FE: Add item to cart
+    FE->>GW: POST /api/carts/{cid}/items
+    GW->>CS: POST /carts/{cid}/items
+    CS-->>GW: Cart (updated)
+    GW-->>FE: Cart
 
-    %% Book tickets (Saga)
-    C->>FE: Select seats → confirm booking
-    FE->>GW: POST /api/booking
-    GW->>BO: POST /booking
-    Note over BO: Step 1-2: Validate schedule + room seats
-    BO->>SD: GET /schedules/{id}
-    SD-->>BO: Schedule (movie_id, room_id, price)
-    BO->>RO: GET /rooms/{room_id}/seats
-    RO-->>BO: Seat[]
-    Note over BO: Step 3: Check double-booking (local DB)
-    BO->>CU: GET /customers/phone/{phone}
-    CU-->>BO: Customer (or 404 → create)
-    BO->>CU: POST /customers (if new)
-    CU-->>BO: Customer
-    Note over BO: Step 5: Calculate payment (price, points)
-    Note over BO: Step 6-7: INSERT TicketBill + Tickets
-    BO->>CU: PATCH /customers/{id}/points
-    CU-->>BO: updated Customer
-    Note over BO: Step 9: bill status=paid → COMMIT
-    BO-->>GW: BillOut (with tickets)
-    GW-->>FE: BillOut
-    FE-->>C: Booking confirmed ✅
+    %% Place order (Saga)
+    C->>FE: Checkout → confirm order
+    FE->>GW: POST /api/orders
+    GW->>OS: POST /orders
 
-    %% Cancel booking (Compensation)
-    C->>FE: Cancel booking
-    FE->>GW: POST /api/booking/{id}/cancel
-    GW->>BO: POST /booking/{id}/cancel
-    Note over BO: Mark tickets canceled
-    BO->>CU: PATCH /customers/{customer_id}/points (restore)
-    CU-->>BO: updated Customer
-    Note over BO: bill status=canceled → COMMIT
-    BO-->>FE: canceled bill
+    Note over OS: Step 1 — Get cart
+    OS->>CS: GET /carts/{cid}
+    CS-->>OS: CartItem[]
+
+    Note over OS: Step 2 — Reserve inventory
+    OS->>IV: POST /inventory/reserve
+    IV-->>OS: 200 OK (or 409 Conflict)
+
+    Note over OS: Step 3 — Get customer
+    OS->>CU: GET /customers/{id}
+    CU-->>OS: Customer (address, wallet)
+
+    Note over OS: Step 4-5 — Validate voucher + calculate total
+
+    Note over OS: Step 6 — INSERT Order (PENDING) + OrderItems
+
+    Note over OS: Step 7 — Process payment
+    OS->>PY: POST /payments
+    PY-->>OS: Payment (COMPLETED)
+
+    Note over OS: Step 8 — UPDATE order → CONFIRMED → COMMIT
+    OS-->>GW: OrderOut (with items)
+    GW-->>FE: OrderOut
+    FE-->>C: Order confirmed ✅
+
+    Note over OS: Step 9 — Clear cart (async)
+    OS->>CS: DELETE /carts/{cid}
+
+    Note over OS: Step 10 — Notify customer (fire-and-forget)
+    OS->>NS: POST /notifications
+    NS-->>OS: 202 Accepted
+
+    %% Cancel order (Compensation)
+    C->>FE: Cancel order
+    FE->>GW: POST /api/orders/{id}/cancel
+    GW->>OS: POST /orders/{id}/cancel
+
+    Note over OS: Validate status (PENDING or CONFIRMED only)
+
+    OS->>IV: POST /inventory/restore
+    IV-->>OS: 200 OK
+
+    OS->>PY: POST /payments/{id}/refund
+    PY-->>OS: Payment (REFUNDED)
+
+    Note over OS: UPDATE order → CANCELLED → COMMIT
+    OS-->>GW: Cancelled order
+    GW-->>FE: Cancelled order
     FE-->>C: Cancellation confirmed ✅
+
+    OS->>NS: POST /notifications (cancel event, async)
 ```
 
 ---
@@ -280,67 +354,60 @@ sequenceDiagram
 
 ### 3.1 Uniform Contract Design
 
-Service Contract specification for each service. Full OpenAPI specs:
-- [`docs/api-specs/service-movie.yaml`](api-specs/service-movie.yaml) — Movie Service
-- [`docs/api-specs/service-room.yaml`](api-specs/service-room.yaml) — Room Service
-- [`docs/api-specs/service-schedule.yaml`](api-specs/service-schedule.yaml) — Schedule Service
-- [`docs/api-specs/service-customer.yaml`](api-specs/service-customer.yaml) — Customer Service
-- [`docs/api-specs/service-booking.yaml`](api-specs/service-booking.yaml) — Booking Service
+Service Contract specification for each service.
 
-**API Gateway (Nginx :8082):**
+---
+
+**API Gateway (Nginx :8080):**
 
 | Endpoint | Method | Media Type | Response Codes |
 |----------|--------|------------|----------------|
-| `/api/movies` | GET | application/json | 200 |
-| `/api/movies/{id}` | GET | application/json | 200, 404 |
-| `/api/rooms` | GET | application/json | 200 |
-| `/api/rooms/{id}` | GET | application/json | 200, 404 |
-| `/api/rooms/{id}/seats` | GET | application/json | 200, 404 |
-| `/api/schedules` | GET | application/json | 200 |
-| `/api/schedules/{id}` | GET | application/json | 200, 404 |
-| `/api/schedules/{id}/seats` | GET | application/json | 200, 404 |
+| `/api/products` | GET | application/json | 200 |
+| `/api/products/{id}` | GET | application/json | 200, 404 |
+| `/api/products/search?q=` | GET | application/json | 200 |
+| `/api/categories` | GET | application/json | 200 |
+| `/api/categories/{id}/products` | GET | application/json | 200, 404 |
+| `/api/carts/{cid}` | GET | application/json | 200, 404 |
+| `/api/carts/{cid}` | DELETE | application/json | 200 |
+| `/api/carts/{cid}/items` | POST | application/json | 200, 400 |
+| `/api/carts/{cid}/items/{pid}` | PATCH | application/json | 200, 404 |
+| `/api/carts/{cid}/items/{pid}` | DELETE | application/json | 200, 404 |
 | `/api/customers` | POST | application/json | 201, 400 |
 | `/api/customers/{id}` | GET | application/json | 200, 404 |
-| `/api/customers/phone/{phone}` | GET | application/json | 200, 404 |
-| `/api/customers/{id}/points` | PATCH | application/json | 200, 400, 404 |
-| `/api/booking` | POST | application/json | 201, 400, 409, 503 |
-| `/api/booking/{id}/cancel` | POST | application/json | 200, 400, 404 |
-| `/api/booking/schedule/{id}/available-seats` | GET | application/json | 200, 503 |
-| `/api/bills/{id}` | GET | application/json | 200, 404 |
-| `/api/bills/customer/{id}` | GET | application/json | 200 |
-| `/api/tickets/{id}` | GET | application/json | 200, 404 |
+| `/api/customers/{id}/addresses` | POST | application/json | 201, 400 |
+| `/api/customers/{id}/wallet` | PATCH | application/json | 200, 400, 404 |
+| `/api/inventory/{product_id}` | GET | application/json | 200, 404 |
+| `/api/orders` | POST | application/json | 201, 400, 409, 503 |
+| `/api/orders/{id}` | GET | application/json | 200, 404 |
+| `/api/orders/{id}/cancel` | POST | application/json | 200, 400, 404 |
+| `/api/orders/customer/{id}` | GET | application/json | 200 |
+| `/api/payments/{id}` | GET | application/json | 200, 404 |
 
 ---
 
-**Movie Service (FastAPI :5001):**
+**Product Service (FastAPI :5001):**
 
 | Endpoint | Method | Media Type | Response Codes |
 |----------|--------|------------|----------------|
 | `/health` | GET | `application/json` | 200 |
-| `/movies` | GET | `application/json` | 200 |
-| `/movies/{id}` | GET | `application/json` | 200, 404 |
+| `/products` | GET | `application/json` | 200 |
+| `/products/{id}` | GET | `application/json` | 200, 404 |
+| `/products/search` | GET | `application/json` | 200 |
+| `/categories` | GET | `application/json` | 200 |
+| `/categories/{id}/products` | GET | `application/json` | 200, 404 |
 
 ---
 
-**Room Service (FastAPI :5004):**
+**Cart Service (FastAPI :5002):**
 
 | Endpoint | Method | Media Type | Response Codes |
 |----------|--------|------------|----------------|
 | `/health` | GET | `application/json` | 200 |
-| `/rooms` | GET | `application/json` | 200 |
-| `/rooms/{id}` | GET | `application/json` | 200, 404 |
-| `/rooms/{id}/seats` | GET | `application/json` | 200, 404 |
-
----
-
-**Schedule Service (FastAPI :5005):**
-
-| Endpoint | Method | Media Type | Response Codes |
-|----------|--------|------------|----------------|
-| `/health` | GET | `application/json` | 200 |
-| `/schedules` | GET | `application/json` | 200 |
-| `/schedules/{id}` | GET | `application/json` | 200, 404 |
-| `/schedules/{id}/seats` | GET | `application/json` | 200, 404 |
+| `/carts/{customer_id}` | GET | `application/json` | 200, 404 |
+| `/carts/{customer_id}` | DELETE | `application/json` | 200 |
+| `/carts/{customer_id}/items` | POST | `application/json` | 200, 400 |
+| `/carts/{customer_id}/items/{product_id}` | PATCH | `application/json` | 200, 404 |
+| `/carts/{customer_id}/items/{product_id}` | DELETE | `application/json` | 200, 404 |
 
 ---
 
@@ -351,134 +418,201 @@ Service Contract specification for each service. Full OpenAPI specs:
 | `/health` | GET | `application/json` | 200 |
 | `/customers` | POST | `application/json` | 201, 400 |
 | `/customers/{id}` | GET | `application/json` | 200, 404 |
-| `/customers/phone/{phone}` | GET | `application/json` | 200, 404 |
-| `/customers/{id}/points` | PATCH | `application/json` | 200, 400, 404 |
+| `/customers/email/{email}` | GET | `application/json` | 200, 404 |
+| `/customers/{id}/addresses` | GET | `application/json` | 200 |
+| `/customers/{id}/addresses` | POST | `application/json` | 201, 400 |
+| `/customers/{id}/wallet` | GET | `application/json` | 200, 404 |
+| `/customers/{id}/wallet` | PATCH | `application/json` | 200, 400, 404 |
 
 ---
 
-**Booking Service (FastAPI :5002):**
+**Inventory Service (FastAPI :5004):**
 
 | Endpoint | Method | Media Type | Response Codes |
 |----------|--------|------------|----------------|
 | `/health` | GET | `application/json` | 200 |
-| `/booking` | POST | `application/json` | 201, 400, 409, 503 |
-| `/booking/{id}/cancel` | POST | `application/json` | 200, 400, 404 |
-| `/booking/schedule/{id}/available-seats` | GET | `application/json` | 200, 503 |
-| `/bills/{id}` | GET | `application/json` | 200, 404 |
-| `/bills/customer/{id}` | GET | `application/json` | 200 |
-| `/tickets/{id}` | GET | `application/json` | 200, 404 |
+| `/inventory/{product_id}` | GET | `application/json` | 200, 404 |
+| `/inventory/reserve` | POST | `application/json` | 200, 409 |
+| `/inventory/restore` | POST | `application/json` | 200 |
+
+---
+
+**Order Service (FastAPI :5005):**
+
+| Endpoint | Method | Media Type | Response Codes |
+|----------|--------|------------|----------------|
+| `/health` | GET | `application/json` | 200 |
+| `/orders` | POST | `application/json` | 201, 400, 409, 503 |
+| `/orders/{id}` | GET | `application/json` | 200, 404 |
+| `/orders/{id}/cancel` | POST | `application/json` | 200, 400, 404 |
+| `/orders/customer/{customer_id}` | GET | `application/json` | 200 |
+
+---
+
+**Payment Service (FastAPI :5006):**
+
+| Endpoint | Method | Media Type | Response Codes |
+|----------|--------|------------|----------------|
+| `/health` | GET | `application/json` | 200 |
+| `/payments` | POST | `application/json` | 201, 400 |
+| `/payments/{id}` | GET | `application/json` | 200, 404 |
+| `/payments/{id}/refund` | POST | `application/json` | 200, 400, 404 |
+
+---
+
+**Notification Service (FastAPI :5007):**
+
+| Endpoint | Method | Media Type | Response Codes |
+|----------|--------|------------|----------------|
+| `/health` | GET | `application/json` | 200 |
+| `/notifications` | POST | `application/json` | 202 |
 
 ---
 
 ### 3.2 Service Logic Design
 
-## Movie Service — Logic
+#### Product Service — Logic
 
 ```mermaid
 flowchart TD
-    A[GET /movies] --> B[Return active movies]
+    A[GET /products] --> B[Query DB with filters: category, price, sort]
+    B --> C[Return paginated Product list]
 
-    C[GET /movies id] --> D[Lookup by ID]
-    D -->|Not found| E[Return 404]
-    D --> F[Return 200]
+    D[GET /products/search?q=] --> E[Full-text search on name + description]
+    E --> F[Return matching Product list]
+
+    G[GET /products/id] --> H[Lookup by ID]
+    H -->|Not found| I[Return 404]
+    H --> J[Return 200]
 ```
 
-## Room Service — Logic
+---
+
+#### Cart Service — Logic
 
 ```mermaid
 flowchart TD
-    A[GET /rooms] --> B[Return room list]
+    A[GET /carts/cid] --> B[Lookup cart in Redis]
+    B -->|Not found| C[Return empty cart]
+    B --> D[Return Cart with items]
 
-    C[GET /rooms id] --> D[Lookup by ID]
-    D -->|Not found| E[Return 404]
-    D --> F[Return 200]
+    E[POST /carts/cid/items] --> F{Item already in cart?}
+    F -->|Yes| G[Accumulate quantity]
+    F -->|No| H[Add new item]
+    G & H --> I[Save to Redis, Return Cart]
 
-    G[GET /rooms id seats] --> H[Return seat list]
+    J[PATCH /carts/cid/items/pid] --> K{quantity = 0?}
+    K -->|Yes| L[Remove item from cart]
+    K -->|No| M[Update quantity]
+    L & M --> N[Return updated Cart]
+
+    O[DELETE /carts/cid] --> P[Remove cart key from Redis]
+    P --> Q[Return 200]
 ```
 
-## Schedule Service — Logic
+---
+
+#### Customer Service — Logic
 
 ```mermaid
 flowchart TD
-    A[GET /schedules by movie] --> B[Return schedules]
-
-    C[GET /schedules id] --> D[Lookup by ID]
-    D -->|Not found| E[Return 404]
-    D --> F[Return 200]
-
-    G[GET /schedules id seats] --> H[Get room_id]
-    H --> I[Call Room Service]
-    I --> J[Return seats]
-```
-
-## Customer Service — Logic
-
-```mermaid
-flowchart TD
-    A[POST /customers] --> B[Check phone unique]
+    A[POST /customers] --> B[Check email unique]
     B -->|Duplicate| C[Return 400]
-    B --> D[Insert customer]
+    B --> D[INSERT customer with wallet_balance = 0]
     D --> E[Return 201]
 
-    F[GET /customers phone] --> G[Lookup customer]
+    F[GET /customers/id] --> G[Lookup by ID]
     G -->|Not found| H[Return 404]
+    G --> I[Return 200]
 
-    I[PATCH /customers points] --> J[Update points]
-    J --> K[Clamp >= 0]
-    K --> L[Return updated customer]
+    J[PATCH /customers/id/wallet] --> K{delta < 0 and balance insufficient?}
+    K -->|Yes| L[Return 400 Insufficient balance]
+    K -->|No| M[UPDATE wallet_balance]
+    M --> N[Return updated wallet]
 ```
 
-## Booking Service — Booking Saga Flow
+---
+
+#### Inventory Service — Logic
 
 ```mermaid
 flowchart TD
-    A[POST /booking] --> B[Get schedule]
-    B -->|Error| X1[Return error]
+    A[GET /inventory/pid] --> B[Read from Redis cache]
+    B -->|Cache miss| C[Read from DB, populate cache]
+    B --> D[Return stock info]
 
-    B --> C[Get seats from schedule]
-    C --> D[Check seat conflicts]
-    D -->|Conflict| X2[Return 409]
+    E[POST /inventory/reserve] --> F[For each item in request]
+    F --> G[ATOMIC Redis DECRBY]
+    G -->|Result < 0| H[ROLLBACK increments for all items]
+    H --> I[Return 409 Insufficient stock]
+    G -->|OK| J[Write deduction to DB]
+    J --> K[Return 200 reserved]
 
-    D --> E[Get customer by phone]
-    E -->|Not found| F[Create customer]
-
-    E --> G[Calculate payment]
-    G -->|Invalid| X3[Return 400]
-
-    G --> H[Insert TicketBill]
-    H --> I[Insert Tickets]
-
-    I --> J[Update customer points]
-    J --> K[Set bill paid]
-
-    K --> L[Commit DB]
-    L --> M[Return success]
-
-    X1 --> N[End]
-    X2 --> N
-    X3 --> N
+    L[POST /inventory/restore] --> M[For each item: ATOMIC Redis INCRBY]
+    M --> N[Write restore to DB]
+    N --> O[Return 200]
 ```
 
-## Booking Service — Cancel Saga (Compensation)
+---
+
+#### Order Service — Order Saga Flow
 
 ```mermaid
 flowchart TD
-    A[POST /booking cancel] --> B[Get bill]
+    A[POST /orders] --> B[GET /carts - Cart Service]
+    B -->|Empty or error| X1[Return 400]
+
+    B --> C[POST /inventory/reserve - Inventory Service]
+    C -->|409 Conflict| X2[Return 409 Insufficient stock]
+
+    C --> D[GET /customers/id - Customer Service]
+    D -->|Not found| X3[Return 400]
+
+    D --> E[Validate voucher code]
+    E -->|Invalid| X4[Return 400 Invalid voucher]
+
+    E --> F[Calculate total: subtotal + shipping - discount]
+
+    F --> G[INSERT Order PENDING + OrderItems]
+
+    G --> H[POST /payments - Payment Service]
+    H -->|Error| X5[Compensate: restore inventory, set Order FAILED, Return 503]
+
+    H --> I[UPDATE Order → CONFIRMED, COMMIT]
+
+    I --> J[DELETE /carts - Cart Service async]
+    J --> K[POST /notifications - Notification Service async fire-and-forget]
+    K --> L[Return 201 OrderOut]
+
+    X1 & X2 & X3 & X4 --> Z[End with error]
+    X5 --> Z
+```
+
+---
+
+#### Order Service — Cancel Saga (Compensation)
+
+```mermaid
+flowchart TD
+    A[POST /orders/id/cancel] --> B[GET order from DB]
     B -->|Not found| X1[Return 404]
 
-    B --> C[Check already canceled]
-    C -->|Yes| X2[Return 400]
+    B --> C{status is PENDING or CONFIRMED?}
+    C -->|No - already SHIPPING or DELIVERED| X2[Return 400 Cannot cancel]
 
-    C --> D[Restore points via Customer Service]
+    C -->|Yes| D[POST /inventory/restore - Inventory Service]
     D -->|Error| X3[Return 503]
 
-    D --> E[Mark tickets canceled]
-    E --> F[Set bill canceled]
-    F --> G[Commit DB]
+    D --> E{Payment method is WALLET?}
+    E -->|Yes| F[POST /payments/id/refund - Payment Service]
+    F -->|Error| X4[Return 503]
+    E -->|No - COD| G
 
-    G --> H[Return success]
+    F --> G[UPDATE Order → CANCELLED, COMMIT]
+    G --> H[POST /notifications - Notification Service async]
+    H --> I[Return 200 Cancelled order]
 
-    X1 --> Z[End]
-    X2 --> Z
-    X3 --> Z
+    X1 & X2 & X3 & X4 --> Z[End with error]
 ```
+
+---
